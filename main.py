@@ -57,6 +57,7 @@ def parse_config():
     parser.add_argument('--directed', dest='directed', action='store_true',
                         help='Graph is (un)directed. Default is undirected.')
     parser.add_argument('--undirected', dest='undirected', action='store_false')
+    parser.add_argument('--master', 'master', default='local[*]')
     parser.set_defaults(directed=False)
 
     args = parser.parse_args()
@@ -73,22 +74,15 @@ def parse_config():
     config.q = args.q
     config.weighted = args.weighted
     config.directed = args.directed
+    config.master = args.master
 
     return config
 
 
-def main(args):
-    """
-    Pipeline for representational learning for all nodes in a graph.
-    """
-    nx_G = node2vec.read_graph(args.input, args.weighted, args.directed)
-    G = node2vec.Graph(nx_G, args.directed, args.p, args.q)
-    G.preprocess_transition_probs()
-    walks = G.simulate_walks(args.num_walks, args.walk_length)
-    node2vec.learn_embeddings(
-        walks, args.dimensions, args.window_size, args.iter, args.workers, args.output)
+def main():
+    config = parse_config()
+    node2vec.run_n2v(config)
 
 
 if __name__ == '__main__':
-    config = parse_config()
-    node2vec.run_n2v(config)
+    main()

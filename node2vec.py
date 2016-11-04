@@ -2,6 +2,7 @@ import numpy as np
 import networkx as nx
 import random
 from gensim.models import Word2Vec
+from pyspark import SparkConf, SparkContext
 
 
 class N2VConfig:
@@ -18,6 +19,43 @@ class N2VConfig:
         self.q = 1
         self.weighted = False
         self.directed = False
+        self.master = 'local[*]'
+
+
+def simulate_walks(sc: SparkContext, graph, alias_nodes, alias_edges, num_walks, walk_length):
+    nodes = list(graph.nodes()) * num_walks
+    b_graph = sc.broadcast(graph)
+    b_alias_nodes = sc.broadcast(alias_nodes)
+    b_alias_edges = sc.broadcast(alias_edges)
+    walks = sc.parallelize(nodes)\
+        .map(lambda node: node2vec_walk(b_graph, b_alias_nodes, b_alias_edges, walk_length, node))\
+        .collect()
+    random.shuffle(walks)
+    return walks
+
+
+def node2vec_walk(b_graph, b_alias_nodes, b_alias_edges, walk_length, start_node):
+    graph = b_graph.value
+    alias_nodes = b_alias_nodes.value
+    alias_edges = b_alias_edges.value
+
+    walk = [start_node]
+
+    while len(walk) < walk_length:
+        cur = walk[-1]
+        cur_nbrs = sorted(graph.neighbors(cur))
+        if len(cur_nbrs) > 0:
+            if len(walk) == 1:
+                walk.append(cur_nbrs[alias_draw(alias_nodes[cur][0], alias_nodes[cur][1])])
+            else:
+                prev = walk[-2]
+                next_node = cur_nbrs[alias_draw(alias_edges[(prev, cur)][0],
+                                                alias_edges[(prev, cur)][1])]
+                walk.append(next_node)
+        else:
+            break
+
+    return walk
 
 
 class Graph:
@@ -28,48 +66,6 @@ class Graph:
         self.q = q
         self.alias_nodes = None
         self.alias_edges = None
-
-    def node2vec_walk(self, walk_length, start_node):
-        """
-        Simulate a random walk starting from start node.
-        """
-        G = self.G
-        alias_nodes = self.alias_nodes
-        alias_edges = self.alias_edges
-
-        walk = [start_node]
-
-        while len(walk) < walk_length:
-            cur = walk[-1]
-            cur_nbrs = sorted(G.neighbors(cur))
-            if len(cur_nbrs) > 0:
-                if len(walk) == 1:
-                    walk.append(cur_nbrs[alias_draw(alias_nodes[cur][0], alias_nodes[cur][1])])
-                else:
-                    prev = walk[-2]
-                    next_node = cur_nbrs[alias_draw(alias_edges[(prev, cur)][0],
-                                                    alias_edges[(prev, cur)][1])]
-                    walk.append(next_node)
-            else:
-                break
-
-        return walk
-
-    def simulate_walks(self, num_walks, walk_length):
-        """
-        Repeatedly simulate random walks from each node.
-        """
-        G = self.G
-        walks = []
-        nodes = list(G.nodes())
-        print('Walk iteration:')
-        for walk_iter in range(num_walks):
-            print(str(walk_iter + 1), '/', str(num_walks))
-            random.shuffle(nodes)
-            for node in nodes:
-                walks.append(self.node2vec_walk(walk_length=walk_length, start_node=node))
-
-        return walks
 
     def get_alias_edge(self, src, dst):
         """
@@ -197,9 +193,17 @@ def learn_embeddings(walks, dimensions, window_size, iterations, workers, output
 
 
 def run_n2v(config: N2VConfig):
+    spark_conf = SparkConf().setAppName('node2vec').setMaster(config.master)
+    sc = SparkContext.getOrCreate(spark_conf)
+
     nx_G = read_graph(config.input, config.weighted, config.directed)
     G = Graph(nx_G, config.directed, config.p, config.q)
+
     G.preprocess_transition_probs()
-    walks = G.simulate_walks(config.num_walks, config.walk_length)
+
+    walks = simulate_walks(
+        sc, nx_G, G.alias_nodes, G.alias_edges, config.num_walks, config.walk_length)
+
     learn_embeddings(
-        walks, config.dimensions, config.window_size, config.iter, config.workers, config.output)
+        walks, config.dimensions, config.window_size, config.iterations,
+        config.workers, config.output)
