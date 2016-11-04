@@ -1,6 +1,23 @@
 import numpy as np
 import networkx as nx
 import random
+from gensim.models import Word2Vec
+
+
+class N2VConfig:
+    def __init__(self):
+        self.input = 'graph/karate.edgelist'
+        self.output = 'emb/karate.emb'
+        self.dimensions = 128
+        self.walk_length = 80
+        self.num_walks = 10
+        self.window_size = 10
+        self.iterations = 1
+        self.workers = 8
+        self.p = 1
+        self.q = 1
+        self.weighted = False
+        self.directed = False
 
 
 class Graph:
@@ -90,7 +107,6 @@ class Graph:
             alias_nodes[node] = alias_setup(normalized_probs)
 
         alias_edges = {}
-        triads = {}
 
         if is_directed:
             for edge in G.edges():
@@ -150,3 +166,40 @@ def alias_draw(J, q):
         return kk
     else:
         return J[kk]
+
+
+def read_graph(input_path, weighted, directed):
+    """
+    Reads the input network in networkx.
+    """
+    if weighted:
+        G = nx.read_edgelist(input_path, nodetype=int, data=(('weight', float),),
+                             create_using=nx.DiGraph())
+    else:
+        G = nx.read_edgelist(input_path, nodetype=int, create_using=nx.DiGraph())
+        for edge in G.edges():
+            G[edge[0]][edge[1]]['weight'] = 1
+
+    if not directed:
+        G = G.to_undirected()
+
+    return G
+
+
+def learn_embeddings(walks, dimensions, window_size, iterations, workers, output_path):
+    """
+    Learn embeddings by optimizing the Skipgram objective using SGD.
+    """
+    walks = [list(map(str, walk)) for walk in walks]
+    model = Word2Vec(walks, size=dimensions, window=window_size, min_count=0, sg=1,
+                     workers=workers, iter=iterations)
+    model.save_word2vec_format(output_path)
+
+
+def run_n2v(config: N2VConfig):
+    nx_G = read_graph(config.input, config.weighted, config.directed)
+    G = Graph(nx_G, config.directed, config.p, config.q)
+    G.preprocess_transition_probs()
+    walks = G.simulate_walks(config.num_walks, config.walk_length)
+    learn_embeddings(
+        walks, config.dimensions, config.window_size, config.iter, config.workers, config.output)
