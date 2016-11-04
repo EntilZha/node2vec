@@ -58,64 +58,52 @@ def node2vec_walk(b_graph, b_alias_nodes, b_alias_edges, walk_length, start_node
     return walk
 
 
-class Graph:
-    def __init__(self, nx_G, is_directed, p, q):
-        self.G = nx_G
-        self.is_directed = is_directed
-        self.p = p
-        self.q = q
-        self.alias_nodes = None
-        self.alias_edges = None
+def get_alias_edge(src, dst, graph, p, q):
+    """
+    Get the alias edge setup lists for a given edge.
+    """
 
-    def get_alias_edge(self, src, dst):
-        """
-        Get the alias edge setup lists for a given edge.
-        """
-        G = self.G
-        p = self.p
-        q = self.q
+    unnormalized_probs = []
+    for dst_nbr in sorted(graph.neighbors(dst)):
+        if dst_nbr == src:
+            unnormalized_probs.append(graph[dst][dst_nbr]['weight'] / p)
+        elif graph.has_edge(dst_nbr, src):
+            unnormalized_probs.append(graph[dst][dst_nbr]['weight'])
+        else:
+            unnormalized_probs.append(graph[dst][dst_nbr]['weight'] / q)
+    norm_const = sum(unnormalized_probs)
+    normalized_probs = [float(u_prob) / norm_const for u_prob in unnormalized_probs]
 
-        unnormalized_probs = []
-        for dst_nbr in sorted(G.neighbors(dst)):
-            if dst_nbr == src:
-                unnormalized_probs.append(G[dst][dst_nbr]['weight'] / p)
-            elif G.has_edge(dst_nbr, src):
-                unnormalized_probs.append(G[dst][dst_nbr]['weight'])
-            else:
-                unnormalized_probs.append(G[dst][dst_nbr]['weight'] / q)
+    return alias_setup(normalized_probs)
+
+
+def preprocess_transition_probs(sc: SparkContext, graph: nx.Graph, p, q, is_directed):
+    """
+    Preprocessing of transition probabilities for guiding the random walks.
+    """
+
+    alias_nodes = {}
+    for node in graph.nodes():
+        unnormalized_probs = [
+            graph[node][nbr]['weight'] for nbr in sorted(graph.neighbors(node))]
         norm_const = sum(unnormalized_probs)
         normalized_probs = [float(u_prob) / norm_const for u_prob in unnormalized_probs]
+        alias_nodes[node] = alias_setup(normalized_probs)
 
-        return alias_setup(normalized_probs)
+    b_graph = sc.broadcast(graph)
 
-    def preprocess_transition_probs(self):
-        """
-        Preprocessing of transition probabilities for guiding the random walks.
-        """
-        G = self.G
-        is_directed = self.is_directed
+    if is_directed:
+        alias_edges = sc.parallelize(graph.edges())\
+            .map(lambda uv: ((uv[0], uv[1]), get_alias_edge(uv[0], uv[1], b_graph.value, p, q)))\
+            .collectAsMap()
+    else:
+        alias_edges = sc.parallelize(graph.edges())\
+            .flatMap(lambda uv: [
+                ((uv[0], uv[1]), get_alias_edge(uv[0], uv[1], graph, p, q)),
+                ((uv[1], uv[0]), get_alias_edge(uv[1], uv[0], graph, p, q))
+            ]).collectAsMap()
 
-        alias_nodes = {}
-        for node in G.nodes():
-            unnormalized_probs = [G[node][nbr]['weight'] for nbr in sorted(G.neighbors(node))]
-            norm_const = sum(unnormalized_probs)
-            normalized_probs = [float(u_prob) / norm_const for u_prob in unnormalized_probs]
-            alias_nodes[node] = alias_setup(normalized_probs)
-
-        alias_edges = {}
-
-        if is_directed:
-            for edge in G.edges():
-                alias_edges[edge] = self.get_alias_edge(edge[0], edge[1])
-        else:
-            for edge in G.edges():
-                alias_edges[edge] = self.get_alias_edge(edge[0], edge[1])
-                alias_edges[(edge[1], edge[0])] = self.get_alias_edge(edge[1], edge[0])
-
-        self.alias_nodes = alias_nodes
-        self.alias_edges = alias_edges
-
-        return
+    return alias_nodes, alias_edges
 
 
 def alias_setup(probs):
@@ -196,13 +184,13 @@ def run_n2v(config: N2VConfig):
     spark_conf = SparkConf().setAppName('node2vec').setMaster(config.master)
     sc = SparkContext.getOrCreate(spark_conf)
 
-    nx_G = read_graph(config.input, config.weighted, config.directed)
-    G = Graph(nx_G, config.directed, config.p, config.q)
+    graph = read_graph(config.input, config.weighted, config.directed)
 
-    G.preprocess_transition_probs()
+    alias_nodes, alias_edges = preprocess_transition_probs(
+        sc, graph, config.p, config.q, config.directed)
 
     walks = simulate_walks(
-        sc, nx_G, G.alias_nodes, G.alias_edges, config.num_walks, config.walk_length)
+        sc, graph, alias_nodes, alias_edges, config.num_walks, config.walk_length)
 
     learn_embeddings(
         walks, config.dimensions, config.window_size, config.iterations,
