@@ -181,7 +181,7 @@ def learn_embeddings(walks, dimensions, window_size, iterations, workers, output
 
 
 def run_n2v(config: N2VConfig):
-    spark_conf = SparkConf().setAppName('node2vec').setMaster(config.master)
+    spark_conf = SparkConf().setAppName('node2vec wiki').setMaster(config.master)
     sc = SparkContext.getOrCreate(spark_conf)
 
     graph = read_graph(config.input, config.weighted, config.directed)
