@@ -27,7 +27,7 @@ def simulate_walks(sc: SparkContext, graph, alias_nodes, alias_edges, num_walks,
     b_graph = sc.broadcast(graph)
     b_alias_nodes = sc.broadcast(alias_nodes)
     b_alias_edges = sc.broadcast(alias_edges)
-    walks = sc.parallelize(nodes).repartition(120)\
+    walks = sc.parallelize(nodes, 120)\
         .map(lambda node: node2vec_walk(b_graph, b_alias_nodes, b_alias_edges, walk_length, node))\
         .collect()
     random.shuffle(walks)
@@ -93,11 +93,11 @@ def preprocess_transition_probs(sc: SparkContext, graph: nx.Graph, p, q, is_dire
     b_graph = sc.broadcast(graph)
 
     if is_directed:
-        alias_edges = sc.parallelize(graph.edges()).repartition(120)\
+        alias_edges = sc.parallelize(graph.edges(), 120)\
             .map(lambda uv: ((uv[0], uv[1]), get_alias_edge(uv[0], uv[1], b_graph.value, p, q)))\
             .collectAsMap()
     else:
-        alias_edges = sc.parallelize(graph.edges())\
+        alias_edges = sc.parallelize(graph.edges(), 120)\
             .flatMap(lambda uv: [
                 ((uv[0], uv[1]), get_alias_edge(uv[0], uv[1], b_graph.value, p, q)),
                 ((uv[1], uv[0]), get_alias_edge(uv[1], uv[0], b_graph.value, p, q))
