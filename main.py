@@ -57,7 +57,7 @@ def parse_config():
     parser.add_argument('--directed', dest='directed', action='store_true',
                         help='Graph is (un)directed. Default is undirected.')
     parser.add_argument('--undirected', dest='undirected', action='store_false')
-    parser.add_argument('--master', 'master', default='local[*]')
+    parser.add_argument('--master', default='local[*]')
     parser.set_defaults(directed=False)
 
     args = parser.parse_args()
