@@ -9,6 +9,8 @@ class Graph:
         self.is_directed = is_directed
         self.p = p
         self.q = q
+        self.alias_nodes = None
+        self.alias_edges = None
 
     def node2vec_walk(self, walk_length, start_node):
         """
@@ -28,9 +30,9 @@ class Graph:
                     walk.append(cur_nbrs[alias_draw(alias_nodes[cur][0], alias_nodes[cur][1])])
                 else:
                     prev = walk[-2]
-                    next = cur_nbrs[alias_draw(alias_edges[(prev, cur)][0],
-                                               alias_edges[(prev, cur)][1])]
-                    walk.append(next)
+                    next_node = cur_nbrs[alias_draw(alias_edges[(prev, cur)][0],
+                                                    alias_edges[(prev, cur)][1])]
+                    walk.append(next_node)
             else:
                 break
 
