@@ -93,17 +93,15 @@ def preprocess_transition_probs(sc: SparkContext, graph: nx.Graph, p, q, is_dire
     b_graph = sc.broadcast(graph)
 
     if is_directed:
-        alias_edge_pairs = sc.parallelize(graph.edges(), 240)\
+        alias_edges = sc.parallelize(graph.edges(), 1000)\
             .map(lambda uv: ((uv[0], uv[1]), get_alias_edge(uv[0], uv[1], b_graph.value, p, q)))\
-            .collect()
-        alias_edges = dict(alias_edge_pairs)
+            .collectAsMap()
     else:
-        alias_edge_pairs = sc.parallelize(graph.edges(), 240)\
+        alias_edges = sc.parallelize(graph.edges(), 1000)\
             .flatMap(lambda uv: [
                 ((uv[0], uv[1]), get_alias_edge(uv[0], uv[1], b_graph.value, p, q)),
                 ((uv[1], uv[0]), get_alias_edge(uv[1], uv[0], b_graph.value, p, q))
-            ]).collect()
-        alias_edges = dict(alias_edge_pairs)
+            ]).collectAsMap()
 
     return alias_nodes, alias_edges
 
